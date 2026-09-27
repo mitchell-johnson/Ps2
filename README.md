@@ -140,11 +140,15 @@ under `ProgramArguments`:
 </array>
 ```
 
-Then restart it:
+Then reload it. A plain restart keeps using the old settings, so unload the LaunchAgent and load
+it again:
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/com.dualsense-trackpad
+launchctl bootout gui/$(id -u)/com.dualsense-trackpad
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dualsense-trackpad.plist
 ```
+
+Running `./scripts/install.sh` again rewrites this file, so add your options back afterwards.
 
 ## Troubleshooting
 
@@ -170,10 +174,13 @@ Run with `--debug` and touch the pad.
 </details>
 
 <details>
-<summary><b>Touches show up in <code>--debug</code> but the pointer doesn't move</b></summary>
+<summary><b>Touches show up but the pointer doesn't move</b></summary>
 
-Accessibility permission is missing, or it belongs to an older build. Remove the entry, add it
-again, then restart the program.
+With `--debug` the pointer never moves: debug mode only prints touches. Once `--debug` shows
+touches arriving, run the program again without it.
+
+If the pointer still doesn't move, Accessibility permission is missing or belongs to an older
+build. Remove the entry, add it again, then restart the program.
 
 </details>
 
