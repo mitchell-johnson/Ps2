@@ -38,8 +38,8 @@ struct Options {
         var iterator = arguments.makeIterator()
 
         func number(for flag: String) -> Double {
-            guard let text = iterator.next(), let value = Double(text), value >= 0 else {
-                fail("\(flag) needs a non-negative number")
+            guard let text = iterator.next(), let value = Double(text), value.isFinite, value >= 0 else {
+                fail("\(flag) needs a finite, non-negative number")
             }
             return value
         }
@@ -92,26 +92,44 @@ if !options.debug && !CGPreflightPostEventAccess() {
 
 let input = HIDInput()
 let injector = EventInjector()
-let engine = TrackpadEngine(config: options.config)
-var enabled = true
-var muteWasDown = false
 
-input.onConnectionChange = { name, connected in
-    log("\(connected ? "Connected" : "Disconnected"): \(name)")
-    if !connected {
-        engine.reset().forEach(injector.perform)
+/// Gesture state is kept per controller so reports from several connected controllers
+/// don't interleave into one touch stream.
+final class Controller {
+    let engine: TrackpadEngine
+    var muteWasDown = false
+
+    init(config: TrackpadConfig) {
+        engine = TrackpadEngine(config: config)
+    }
+}
+var controllers: [HIDInput.ControllerID: Controller] = [:]
+var enabled = true
+
+func resetAll() {
+    for controller in controllers.values {
+        controller.engine.reset().forEach(injector.perform)
     }
 }
 
-input.onReport = { report in
-    guard let state = DualSenseReport.parse(report) else { return }
+input.onConnectionChange = { id, name, connected in
+    log("\(connected ? "Connected" : "Disconnected"): \(name)")
+    if connected {
+        controllers[id] = Controller(config: options.config)
+    } else {
+        controllers.removeValue(forKey: id)?.engine.reset().forEach(injector.perform)
+    }
+}
 
-    if state.muteButton && !muteWasDown {
+input.onReport = { id, report in
+    guard let controller = controllers[id], let state = DualSenseReport.parse(report) else { return }
+
+    if state.muteButton && !controller.muteWasDown {
         enabled.toggle()
-        engine.reset().forEach(injector.perform)
+        resetAll()
         log("Trackpad mode \(enabled ? "on" : "off")")
     }
-    muteWasDown = state.muteButton
+    controller.muteWasDown = state.muteButton
 
     if options.debug {
         let touches = state.touches.map { "#\($0.id) (\($0.x), \($0.y))" }.joined(separator: "  ")
@@ -125,7 +143,7 @@ input.onReport = { report in
         clicked: state.touchpadClicked,
         timestamp: ProcessInfo.processInfo.systemUptime
     )
-    engine.process(frame).forEach(injector.perform)
+    controller.engine.process(frame).forEach(injector.perform)
 }
 
 guard input.start() else {
@@ -142,7 +160,7 @@ signal(SIGTERM, SIG_IGN)
 let signalSources = [SIGINT, SIGTERM].map { signalNumber -> DispatchSourceSignal in
     let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
     source.setEventHandler {
-        engine.reset().forEach(injector.perform)
+        resetAll()
         log("Stopped")
         exit(0)
     }

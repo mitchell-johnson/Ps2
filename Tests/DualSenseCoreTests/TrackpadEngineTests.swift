@@ -93,6 +93,12 @@ final class TrackpadEngineTests: XCTestCase {
         XCTAssertEqual(frame([]), [])
     }
 
+    func testDragEndsAtFinalFingerPosition() {
+        frame([finger(500, 500)])
+        frame([finger(500, 500)], clicked: true)
+        XCTAssertEqual(frame([finger(510, 500)], clicked: false), [.move(dx: 6, dy: 0), .buttonUp(.left)])
+    }
+
     func testDragWithSecondFingerWhileThumbHoldsClick() {
         frame([finger(200, 900, id: 1)])
         frame([finger(200, 900, id: 1)], clicked: true)

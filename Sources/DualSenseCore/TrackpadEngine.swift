@@ -133,7 +133,9 @@ public final class TrackpadEngine {
             session?.travel += largest
         }
 
-        // Physical click on the touchpad.
+        // Physical click on the touchpad. The release is handled after movement so a
+        // drag ends where the finger ends up.
+        let released = !frame.clicked && wasClicked
         if frame.clicked && !wasClicked {
             let button: MouseButton =
                 config.twoFingerSecondaryClick && fingerCount >= 2 ? .right : .left
@@ -141,9 +143,6 @@ public final class TrackpadEngine {
             session?.physicalClick = true
             momentum = nil
             actions.append(.buttonDown(button))
-        } else if !frame.clicked && wasClicked, let button = heldButton {
-            heldButton = nil
-            actions.append(.buttonUp(button))
         }
         wasClicked = frame.clicked
 
@@ -176,6 +175,11 @@ public final class TrackpadEngine {
                 session = nil
             }
             coast(dt: dt, actions: &actions)
+        }
+
+        if released, let button = heldButton {
+            heldButton = nil
+            actions.append(.buttonUp(button))
         }
 
         previous = Dictionary(frame.touches.map { ($0.id, $0) }, uniquingKeysWith: { $1 })

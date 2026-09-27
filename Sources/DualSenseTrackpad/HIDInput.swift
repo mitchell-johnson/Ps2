@@ -5,20 +5,26 @@ import IOKit.hid
 
 /// Watches for DualSense controllers (USB or Bluetooth) and forwards their raw input reports.
 final class HIDInput {
+    /// Identifies one connected controller for as long as it stays connected.
+    typealias ControllerID = Int
+
     /// Called on the main run loop with each raw input report (first byte is the report ID).
-    var onReport: (([UInt8]) -> Void)?
-    var onConnectionChange: ((_ name: String, _ connected: Bool) -> Void)?
+    var onReport: ((_ controller: ControllerID, _ report: [UInt8]) -> Void)?
+    var onConnectionChange: ((_ controller: ControllerID, _ name: String, _ connected: Bool) -> Void)?
 
     private let manager: IOHIDManager
     private var devices: [DeviceHandle] = []
+    private var nextControllerID: ControllerID = 0
 
     private final class DeviceHandle {
+        let id: ControllerID
         let device: IOHIDDevice
         let buffer: UnsafeMutablePointer<UInt8>
         let bufferSize = 128
         weak var owner: HIDInput?
 
-        init(device: IOHIDDevice, owner: HIDInput) {
+        init(id: ControllerID, device: IOHIDDevice, owner: HIDInput) {
+            self.id = id
             self.device = device
             self.owner = owner
             buffer = .allocate(capacity: bufferSize)
@@ -59,7 +65,8 @@ final class HIDInput {
 
     private func attach(_ device: IOHIDDevice) {
         guard !devices.contains(where: { $0.device === device }) else { return }
-        let handle = DeviceHandle(device: device, owner: self)
+        let handle = DeviceHandle(id: nextControllerID, device: device, owner: self)
+        nextControllerID += 1
         devices.append(handle)
 
         enableFullReports(device)
@@ -74,18 +81,18 @@ final class HIDInput {
                 if bytes.first.map(UInt32.init) != reportID {
                     bytes.insert(UInt8(truncatingIfNeeded: reportID), at: 0)
                 }
-                handle.owner?.onReport?(bytes)
+                handle.owner?.onReport?(handle.id, bytes)
             },
             Unmanaged.passUnretained(handle).toOpaque()
         )
-        onConnectionChange?(name(of: device), true)
+        onConnectionChange?(handle.id, name(of: device), true)
     }
 
     private func detach(_ device: IOHIDDevice) {
         guard let index = devices.firstIndex(where: { $0.device === device }) else { return }
-        IOHIDDeviceRegisterInputReportCallback(device, devices[index].buffer, devices[index].bufferSize, nil, nil)
-        devices.remove(at: index)
-        onConnectionChange?(name(of: device), false)
+        let handle = devices.remove(at: index)
+        IOHIDDeviceRegisterInputReportCallback(device, handle.buffer, handle.bufferSize, nil, nil)
+        onConnectionChange?(handle.id, name(of: device), false)
     }
 
     /// Over Bluetooth the controller only sends a basic report (no touchpad) until the
